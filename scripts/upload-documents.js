@@ -21,7 +21,7 @@ async function uploadDocuments(apiUrl, dataFolder) {
 
         // Test if file already exist in blob storage
         const FileResponse = await fetch(`${uploadUrl}/${file}`);
-        console.log(FileResponse);
+
         if (FileResponse.status === 404) {
           console.log(`File ${file} does not exist in the blob storage.`);
           // File does not exist, proceed with upload

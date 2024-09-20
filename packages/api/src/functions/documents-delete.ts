@@ -7,6 +7,8 @@ import { AzureOpenAIEmbeddings } from '@langchain/openai';
 import { badRequest, serviceUnavailable, ok } from '../http-response.js';
 import { getAzureOpenAiTokenProvider, getCredentials } from '../security.js';
 
+// Function not working
+
 export async function deleteDocuments(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   const storageUrl = process.env.AZURE_STORAGE_URL;
   const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME;
@@ -27,7 +29,7 @@ export async function deleteDocuments(request: HttpRequest, context: InvocationC
     // Type mismatch between Node.js FormData and Azure Functions FormData
     const file = parsedForm.get('file') as any as File;
     const filename = file.name;
-
+    context.log(`Deletion in progress`);
     if (azureOpenAiEndpoint) {
       const azureADTokenProvider = getAzureOpenAiTokenProvider();
 
@@ -43,12 +45,10 @@ export async function deleteDocuments(request: HttpRequest, context: InvocationC
       // Initialize the vector store
       await vectorStore.initialize();
 
-      const deleteParameters = {
-        filter: `metadata.source: ${filename}`,
-      };
-
-      await vectorStore.delete(deleteParameters);
-      console.log(`Deleted document with filename: ${filename}`);
+      const query = `SELECT * FROM c WHERE c.metadata.source = "${filename}"`;
+      context.log(`Trying to delete document with filename: ${filename} from cosmosdb with query ${query}`);
+      await vectorStore.delete({ filter: query });
+      context.log(`Deleted document successfully with filename : ${filename}`);
     } else {
       // Delete on local setup  has not been implemented yet
     }
@@ -80,6 +80,44 @@ export async function deleteDocuments(request: HttpRequest, context: InvocationC
   }
 }
 
+export async function deleteDB(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  const azureOpenAiEndpoint = process.env.AZURE_OPENAI_API_ENDPOINT;
+  const cosmosdbEndpoint = process.env.AZURE_COSMOSDB_NOSQL_ENDPOINT;
+  const cosmosdbDB = 'vectorSearchDB';
+  const cosmosdbContainer = 'vectorSearchContainer';
+  const credentials = getCredentials();
+
+  try {
+    context.log(`DB Deletion in progress`);
+    if (azureOpenAiEndpoint) {
+      const azureADTokenProvider = getAzureOpenAiTokenProvider();
+
+      // Initialize embeddings model and vector database
+      const embeddings = new AzureOpenAIEmbeddings({ azureADTokenProvider });
+      const vectorStore = new AzureCosmosDBNoSQLVectorStore(embeddings, {
+        endpoint: cosmosdbEndpoint,
+        credentials,
+        databaseName: cosmosdbDB,
+        containerName: cosmosdbContainer,
+      });
+
+      // Initialize the vector store
+      await vectorStore.initialize();
+      await vectorStore.delete();
+      context.log(`Deleted db`);
+    } else {
+      // Delete on local setup  has not been implemented yet
+    }
+
+    return ok({ message: 'DB deleted successfully.' });
+  } catch (_error: unknown) {
+    const error = _error as Error;
+    context.error(`Error when processing db-delete request: ${error.message}`);
+
+    return serviceUnavailable('Service temporarily unavailable. Please try again later.');
+  }
+}
+
 async function checkFolderExists(folderPath: string): Promise<boolean> {
   try {
     const stats = await fs.stat(folderPath);
@@ -94,4 +132,11 @@ app.http('documents-delete', {
   methods: ['DELETE'],
   authLevel: 'anonymous',
   handler: deleteDocuments,
+});
+
+app.http('cosmosdb-delete', {
+  route: 'db',
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  handler: deleteDB,
 });
